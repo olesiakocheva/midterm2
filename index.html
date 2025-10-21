@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>Wine & Food Pairings — CSV → TF.js</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root{--bg:#f8fafc;--muted:#64748b}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:24px;background:var(--bg);color:#0f172a}
+    h1{margin:0 0 8px}
+    .muted{color:var(--muted)}
+    .card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:16px;margin:12px 0}
+    .row{display:flex;gap:16px;flex-wrap:wrap}
+    .col{flex:1 1 320px}
+    label{font-weight:600}
+    select,input[type="number"]{padding:6px;border:1px solid #e5e7eb;border-radius:8px}
+    button{background:#2563eb;color:#fff;border:0;border-radius:10px;padding:10px 14px;cursor:pointer}
+    button:disabled{opacity:.6;cursor:not-allowed}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-top:1px solid #eee;padding:8px;text-align:left}
+    canvas{border:1px solid #e5e7eb;border-radius:8px;background:#fff}
+    #log{white-space:pre-wrap;background:#0f172a;color:#e5e7eb;font-family:ui-monospace,Consolas,monospace;padding:10px;border-radius:8px;max-height:220px;overflow:auto}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .pill{display:inline-block;background:#ecfccb;border:1px solid #d9f99d;color:#166534;border-radius:999px;padding:2px 8px;font-size:12px}
+    .small{font-size:12px}
+  </style>
+  <!-- libs -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <h1>Wine & Food Pairings — CSV → TF.js</h1>
+  <div class="muted small">Классификация/регрессия по CSV. One-hot (категории), Min-Max (числа), Bag-of-Words (текст). Обучение и инференс — в браузере.</div>
+
+  <div class="card">
+    <div class="row">
+      <div class="col">
+        <h3>1) Данные</h3>
+        <button id="btnLoadEmbedded">Загрузить встроенный CSV</button>
+        <div class="small muted">./data/wine_food_pairings.csv</div>
+        <div style="margin-top:6px">или загрузите свой файл:</div>
+        <input type="file" id="csv" accept=".csv,text/csv" />
+        <div class="grid" style="margin-top:10px">
+          <div>
+            <label>Целевая колонка (y)</label>
+            <select id="colTarget"></select>
+          </div>
+          <div>
+            <label>Тип задачи</label>
+            <select id="task">
+              <option value="auto">Определить автоматически</option>
+              <option value="clf">Классификация</option>
+              <option value="reg">Регрессия</option>
+            </select>
+          </div>
+
+          <div>
+            <label>Текстовая колонка (опц.)</label>
+            <select id="colText"></select>
+          </div>
+          <div>
+            <label>Размер словаря</label>
+            <input type="number" id="vocab" value="500" min="100" max="5000" />
+          </div>
+
+          <div style="grid-column:1/-1">
+            <label>Исключить колонки (через Ctrl/⌘)</label>
+            <select id="exclude" multiple size="6" style="width:100%"></select>
+          </div>
+          <div>
+            <label>Train/Test split (%)</label>
+            <input type="number" id="split" value="80" min="50" max="95" />
+          </div>
+          <div>
+            <label>Баланс классов</label>
+            <select id="classWeight">
+              <option value="off">Выключено</option>
+              <option value="auto">Авто</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-top:10px">
+          <button id="btnPrep" disabled>Подготовить датасет</button>
+        </div>
+        <div id="meta" class="muted" style="margin-top:8px"></div>
+      </div>
+
+      <div class="col">
+        <h3>2) Модель</h3>
+        <div>
+          <label>MLP</label>
+          <select id="arch">
+            <option value="128-64" selected>[128,64] ReLU</option>
+            <option value="256-128-64">[256,128,64] ReLU</option>
+            <option value="64">[64] ReLU</option>
+          </select>
+          &nbsp;
+          <label>Dropout</label>
+          <input type="number" id="drop" value="0.2" step="0.05" min="0" max="0.8" style="width:80px" />
+        </div>
+        <div style="margin-top:8px">
+          <label>Epochs</label> <input type="number" id="epochs" value="20" min="1" max="200" />
+          &nbsp;
+          <label>Batch</label> <input type="number" id="batch" value="64" min="8" max="512" step="8" />
+          &nbsp;
+          <label>LR</label> <input type="number" id="lr" value="0.001" step="0.0005" />
+        </div>
+        <div style="margin-top:8px">
+          <button id="btnBuild" disabled>Собрать модель</button>
+          <button id="btnTrain" disabled>Обучить</button>
+          <button id="btnEval" disabled>Оценить</button>
+        </div>
+        <div style="margin-top:10px">
+          <canvas id="trainChart" width="420" height="220"></canvas>
+        </div>
+      </div>
+
+      <div class="col">
+        <h3>3) Результаты</h3>
+        <div id="results" class="muted"></div>
+        <div style="margin-top:8px">
+          <table>
+            <thead id="thead"></thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="col">
+        <h3>Логи</h3>
+        <div id="log"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    window.addEventListener('error', e=>{
+      const log=document.getElementById('log'); if(log) log.textContent += "❌ " + (e.message||e) + "\n";
+    });
+    window.addEventListener('unhandledrejection', e=>{
+      const log=document.getElementById('log'); if(log) log.textContent += "❌ Promise: " + (e.reason?.message||e.reason) + "\n";
+    });
+  </script>
+
+  <script type="module" src="./data_utils.js?v=1"></script>
+  <script type="module" src="./model.js?v=1"></script>
+  <script type="module" src="./app.js?v=1"></script>
+</body>
+</html>
